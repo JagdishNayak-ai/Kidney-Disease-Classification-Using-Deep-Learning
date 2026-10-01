@@ -1,0 +1,7 @@
+# Exclude raw image data & cache
+data/
+outputs/
+__pycache__/
+*.pyc
+.env
+.venv/
