@@ -28,6 +28,27 @@ def load_kidney_model():
     return tf.keras.models.load_model(MODEL_PATH)
 
 
+def is_valid_ct_scan(img_np):
+    """
+    Input Guardrail: Validates whether the uploaded image is a single-crop CT scan
+    or an Out-of-Distribution (OOD) document/ultrasound report printout.
+    """
+    # 1. Check for document/paper background (high ratio of pure white background pixels)
+    gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+    white_pixel_ratio = np.sum(gray > 240) / gray.size
+    
+    if white_pixel_ratio > 0.30:
+        return False, "Detected document/paper background. Please upload an isolated CT scan slice."
+
+    # 2. Check for multi-panel aspect ratio (standard CT slices are roughly 1:1 square crops)
+    h, w, _ = img_np.shape
+    aspect_ratio = max(h, w) / min(h, w)
+    if aspect_ratio > 1.4:
+        return False, "Detected multi-panel page layout. Please upload an individual CT scan crop."
+
+    return True, "Valid CT Scan"
+
+
 def make_gradcam_heatmap(img_array, model, last_conv_layer_name):
     grad_model = tf.keras.models.Model(
         inputs=model.inputs[0] if isinstance(model.inputs, list) else model.inputs,
@@ -92,6 +113,17 @@ if uploaded_file is not None:
     pil_img = Image.open(uploaded_file).convert('RGB')
     img_np = np.array(pil_img)
     
+    # --- INPUT VALIDATION GUARDRAIL ---
+    is_valid, error_msg = is_valid_ct_scan(img_np)
+    
+    if not is_valid:
+        with tab_diag:
+            st.error("⚠️ Invalid Image Type Detected")
+            st.warning(f"Error: {error_msg}")
+            st.info("💡 Note: This portal is trained strictly on single 2D Abdominal CT Scans. Uploading ultrasound reports or paper documents results in Out-of-Distribution errors.")
+        st.stop()
+    # ----------------------------------
+
     img_resized = cv2.resize(img_np, (224, 224))
     img_uint8 = img_resized.copy()
     img_normalized = img_resized.astype(np.float32) / 255.0
@@ -177,7 +209,7 @@ if uploaded_file is not None:
                 box_color = (255, 0, 0) if "TUMOR" in label else (0, 255, 0)
                 cv2.rectangle(roi_img, (x_min, y_min), (x_max, y_max), box_color, 2)
 
-        # Concise 1-line titles to keep equal height alignment across columns
+        # Single-line headers for grid alignment
         p1, p2, p3, p4 = st.columns(4)
         with p1:
             st.markdown("##### 1. Input Image")
